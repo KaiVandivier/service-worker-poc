@@ -11,8 +11,12 @@ import { clientsClaim } from 'workbox-core'
 import { ExpirationPlugin } from 'workbox-expiration'
 import { precacheAndRoute, createHandlerBoundToURL } from 'workbox-precaching'
 import { registerRoute } from 'workbox-routing'
-import { StaleWhileRevalidate } from 'workbox-strategies'
 import { openDB } from 'idb'
+import { CacheFirst } from 'workbox-strategies'
+import { NetworkFirst } from 'workbox-strategies'
+
+let dbPromise
+const clientRecordingStates = {}
 
 clientsClaim()
 
@@ -22,11 +26,21 @@ clientsClaim()
 // even if you decide not to use precaching. See https://cra.link/PWA
 precacheAndRoute(self.__WB_MANIFEST)
 
-// A test to see if another precacheAndRouteCall works.
-// Limitation: files need to be explicitly specified; I haven't found
-// a way to use a glob yet.
-precacheAndRoute([{ url: './vendor/jquery-3.3.1.min.js', revision: null }])
+/**
+ * A test to see if another precacheAndRouteCall works (it does).
+ * Limitation: files need to be explicitly specified; I haven't found
+ * a way to use a glob yet.
+ * Maybe this could be handled by a cache-first route? It wouldn't be precached.
+ * (Cache-first route is down below)
+ */
+precacheAndRoute([
+    { url: './vendor/jquery-3.3.1.min.js', revision: null },
+    { url: 'nonexistent/url-v1.png', revision: null },
+])
 
+/**
+ * (Kai: Do we need this? It might let us move away from a hash router?)
+ */
 // Set up App Shell-style routing, so that all navigation requests
 // are fulfilled with your index.html shell. Learn more at
 // https://developers.google.com/web/fundamentals/architecture/app-shell
@@ -52,28 +66,66 @@ registerRoute(
     createHandlerBoundToURL(process.env.PUBLIC_URL + '/index.html')
 )
 
-// An example runtime caching route for requests that aren't handled by the
-// precache, in this case same-origin .png requests like those from in public/
+/**
+ * Possible cache-first route for 'vendor' files, if precaching is too complicated.
+ * Do we want to add i18n files here too?
+ */
 registerRoute(
-    // Add in any other file extensions or routing criteria as needed.
-    ({ url }) =>
-        url.origin === self.location.origin && url.pathname.endsWith('.png'), // Customize this strategy as needed, e.g., by changing to CacheFirst.
-    new StaleWhileRevalidate({
-        cacheName: 'images',
-        plugins: [
-            // Ensure that once this runtime cache reaches a maximum size the
-            // least-recently used images are removed.
-            new ExpirationPlugin({ maxEntries: 50 }),
-        ],
+    /(.*)\/vendor\/(.*)/,
+    new CacheFirst({
+        cacheName: 'vendor',
+        plugins: new ExpirationPlugin({ maxAgeSeconds: 30 * 24 * 60 * 60 }), // 30 days
     })
 )
 
+/**
+ * Todo: network-first, but in recording mode
+ */
+registerRoute(
+    ({ url, request, event }) => {
+        if (!isRecording(event.clientId)) return false
+    },
+    async ({ url, request, event, params }) => {
+        // To do: handle record mode
+    }
+)
+
+/**
+ * Todo: network-first caching by default unless filtered out
+ */
+registerRoute(({ url, request, event }) => {
+    // Don't cache external requests by default...
+    if (url.origin !== self.location.origin) return false
+    // if (url matches filter) return false
+    return true
+}, new NetworkFirst({ cacheName: 'app-shell', maxAgeSeconds: 30 * 24 * 60 * 60 }))
+
 // This allows the web app to trigger skipWaiting via
 // registration.waiting.postMessage({type: 'SKIP_WAITING'})
+// Paired with `clientsClaim()` at top of file.
 self.addEventListener('message', (event) => {
     if (event.data && event.data.type === 'SKIP_WAITING') {
         self.skipWaiting()
     }
+
+    // TODO: Add 'start recording'
+    // TODO: Add 'confirm completion'
 })
 
 // Any other custom service worker logic can go here.
+
+// TODO: Open DB on activate
+self.addEventListener('activate', (event) => {
+    event.waitUntil(createDB())
+})
+
+function createDB() {
+    // TODO
+    // dbPromise = openDB(...)
+}
+
+function isRecording(clientId) {
+    /** To do */
+}
+
+// TODO: Add rest of 'record mode' functions here
