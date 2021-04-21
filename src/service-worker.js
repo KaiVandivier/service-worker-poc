@@ -74,7 +74,7 @@ registerRoute(
     /(.*)\/vendor\/(.*)/,
     new CacheFirst({
         cacheName: 'vendor',
-        plugins: new ExpirationPlugin({ maxAgeSeconds: 30 * 24 * 60 * 60 }), // 30 days
+        plugins: [new ExpirationPlugin({ maxAgeSeconds: 30 * 24 * 60 * 60 })], // 30 days
     })
 )
 
@@ -82,23 +82,20 @@ registerRoute(
  * Todo: network-first, but in recording mode
  */
 registerRoute(
-    ({ url, request, event }) => {
-        if (!isRecording(event.clientId)) return false
-    },
-    async ({ url, request, event, params }) => {
-        // To do: handle record mode
-    }
+    ({ url, request, event }) => isClientRecording(event.clientId),
+    handleRecordedRequest
 )
 
 /**
- * Todo: network-first caching by default unless filtered out
+ * Network-first caching by default unless filtered out
  */
 registerRoute(({ url, request, event }) => {
-    // Don't cache external requests by default...
+    // Don't cache external requests by default
+    // QUESTION: Can this safely be generalized to all apps?
     if (url.origin !== self.location.origin) return false
-    // if (url matches filter) return false
+    // TODO: if (url matches filter) return false
     return true
-}, new NetworkFirst({ cacheName: 'app-shell', maxAgeSeconds: 30 * 24 * 60 * 60 }))
+}, new NetworkFirst({ cacheName: 'app-shell', plugins: [new ExpirationPlugin({ maxAgeSeconds: 30 * 24 * 60 * 60 })] }))
 
 // This allows the web app to trigger skipWaiting via
 // registration.waiting.postMessage({type: 'SKIP_WAITING'})
@@ -108,13 +105,18 @@ self.addEventListener('message', (event) => {
         self.skipWaiting()
     }
 
-    // TODO: Add 'start recording'
-    // TODO: Add 'confirm completion'
+    if (event.data && event.data.type === 'START_RECORDING') {
+        startRecording(event)
+    }
+
+    if (event.data && event.data.type === 'COMPLETE_RECORDING') {
+        completeRecording(event.source.id) // same as FetchEvent.clientId
+    }
 })
 
 // Any other custom service worker logic can go here.
 
-// TODO: Open DB on activate
+// Open DB on activation
 self.addEventListener('activate', (event) => {
     event.waitUntil(createDB())
 })
@@ -124,8 +126,147 @@ function createDB() {
     // dbPromise = openDB(...)
 }
 
-function isRecording(clientId) {
-    /** To do */
+function isClientRecording(clientId) {
+    return clientRecordingStates[clientId]?.recordingAllRequests
 }
 
-// TODO: Add rest of 'record mode' functions here
+// Triggered on 'START_RECORDING' message
+function startRecording(event) {
+    console.log('[SW] Starting recording')
+    if (!event.data.recordedSectionId)
+        throw new Error('[SW] No ID specified for recorded section')
+
+    const clientId = event.source.id // clientId from MessageEvent
+    // Throw error if another recording is in process
+    if (isClientRecording(clientId))
+        throw new Error(
+            "[SW] Can't start a new recording; a recording is already in process"
+        )
+
+    const newClientRecordingState = {
+        // 'recordingAll' might be necessary between 'done recording' and 'confirm save recording'
+        recordingAllRequests: true,
+        recordedSectionId: event.data.recordedSectionId,
+        pendingRequests: new Map(),
+        fulfilledRequests: new Map(),
+        recordingTimeout: undefined,
+        recordingTimeoutDelay: event.data.recordingTimeoutDelay || 200,
+        confirmationTimeout: undefined,
+    }
+    clientRecordingStates[clientId] = newClientRecordingState
+}
+
+function removeRecording(clientId) {
+    console.log('[SW] Removing recording for client ID', clientId)
+    delete clientRecordingStates[clientId]
+}
+
+// Triggered by 'COMPLETE_RECORDING' message
+function completeRecording(clientId) {
+    const recordingState = clientRecordingStates[clientId]
+    console.log('[SW] Completing recording', { clientId, recordingState })
+    clearTimeout(recordingState.confirmationTimeout)
+    // TODO: Add content to DB
+    // idb.add(recordingState.recordedSectionId, { lastUpdated, requests: recordingState.fulfilledRequests })
+    removeRecording(clientId)
+}
+
+function startConfirmationTimeout(clientId) {
+    const recordingState = clientRecordingStates[clientId]
+    recordingState.confirmationTimeout = setTimeout(() => {
+        console.warn(
+            '[SW] Completion confirmation timed out. Clearing recording for client',
+            clientId
+        )
+        removeRecording(clientId)
+    }, 10000)
+}
+
+async function requestCompletionConfirmation(clientId) {
+    console.log(
+        '[SW] Requesting completion confirmation from client ID',
+        clientId
+    )
+    const client = await self.clients.get(clientId)
+    if (!client) {
+        console.log('[SW] Client not found for ID', clientId)
+        removeRecording(clientId)
+        return
+    }
+    client.postMessage({ type: 'CONFIRM_RECORDING_COMPLETION', clientId })
+    startConfirmationTimeout(clientId)
+}
+
+function stopRecording(error, clientId) {
+    const recordingState = clientRecordingStates[clientId]
+
+    console.log('[SW] Stopping recording', { clientId, recordingState })
+    clearTimeout(recordingState?.recordingTimeout)
+    recordingState.recordingAllRequests = false
+
+    if (error) {
+        // QUESTION: Anything else we should do to handle errors better?
+        self.clients.get(clientId).then((client) => {
+            console.log('[SW] posting error message to client', client)
+            client.postMessage({
+                type: 'RECORDING_ERROR',
+                clientId,
+                error,
+            })
+        })
+        return
+    }
+
+    requestCompletionConfirmation(clientId)
+}
+
+function startRecordingTimeout(clientId) {
+    const recordingState = clientRecordingStates[clientId]
+    recordingState.recordingTimeout = setTimeout(
+        () => stopRecording(null, clientId),
+        recordingState.recordingTimeoutDelay
+    )
+}
+
+function handleRecordedResponse(request, response, clientId) {
+    const recordingState = clientRecordingStates[clientId]
+    // add response to cache.
+    // TODO: Actually.. should this only happen upon successful recording?
+    // Maybe make a temp cache that can be thrown out if recording fails?
+    addToCache(recordingState.recordedSectionId, request, response)
+
+    // add request to fulfilled
+    recordingState.fulfilledRequests.set(request.url, request)
+
+    // remove request from pending requests
+    recordingState.pendingRequests.delete(request)
+
+    // start timer if pending requests are all complete
+    if (recordingState.pendingRequests.size === 0)
+        startRecordingTimeout(clientId)
+    return response
+}
+
+function handleRecordedRequest({ url, request, event, params }) {
+    const recordingState = clientRecordingStates[event.clientId]
+
+    clearTimeout(recordingState.recordingTimeout)
+    recordingState.pendingRequests.set(request, 'placeholder') // Something better to put here? timestamp?
+
+    fetch(request)
+        .then((response) => {
+            return handleRecordedResponse(request, response, event.clientId)
+        })
+        .catch((error) => {
+            console.errror(error)
+            stopRecording(error, event.clientId)
+        })
+}
+
+function addToCache(cacheKey, request, response) {
+    if (response.ok) {
+        console.log(`[SW] Response ok - adding ${request.url} to cache`)
+        const responseClone = response.clone()
+        caches.open(cacheKey).then((cache) => cache.put(request, responseClone))
+    }
+}
