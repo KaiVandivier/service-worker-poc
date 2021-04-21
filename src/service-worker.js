@@ -126,14 +126,18 @@ function createDB() {
     // dbPromise = openDB(...)
 }
 
+/**
+ * Recording mode helpers
+ */
+
 function isClientRecording(clientId) {
-    return clientRecordingStates[clientId]?.recordingAllRequests
+    return clientRecordingStates[clientId]?.recording
 }
 
 // Triggered on 'START_RECORDING' message
 function startRecording(event) {
     console.log('[SW] Starting recording')
-    if (!event.data.recordedSectionId)
+    if (!event.data.sectionId)
         throw new Error('[SW] No ID specified for recorded section')
 
     const clientId = event.source.id // clientId from MessageEvent
@@ -145,8 +149,8 @@ function startRecording(event) {
 
     const newClientRecordingState = {
         // 'recordingAll' might be necessary between 'done recording' and 'confirm save recording'
-        recordingAllRequests: true,
-        recordedSectionId: event.data.recordedSectionId,
+        recording: true,
+        sectionId: event.data.sectionId,
         pendingRequests: new Map(),
         fulfilledRequests: new Map(),
         recordingTimeout: undefined,
@@ -158,16 +162,30 @@ function startRecording(event) {
 
 function removeRecording(clientId) {
     console.log('[SW] Removing recording for client ID', clientId)
+    // Remove recording state
     delete clientRecordingStates[clientId]
+    // Delete temp cache
+    caches.delete(`temp-${clientId}`)
 }
 
 // Triggered by 'COMPLETE_RECORDING' message
-function completeRecording(clientId) {
+async function completeRecording(clientId) {
     const recordingState = clientRecordingStates[clientId]
     console.log('[SW] Completing recording', { clientId, recordingState })
     clearTimeout(recordingState.confirmationTimeout)
+
+    // Move requests from temp cache to section-<ID> cache
+    const sectionCache = await caches.open(`section-${recordingState.sectionId}`)
+    const tempCache = await caches.open(`temp-${clientId}`)
+    const tempCacheKeys = await tempCache.keys()
+    tempCacheKeys.forEach(async request => {
+        const response = await tempCache.match(request)
+        sectionCache.put(request, response)
+    })
+
     // TODO: Add content to DB
-    // idb.add(recordingState.recordedSectionId, { lastUpdated, requests: recordingState.fulfilledRequests })
+    // idb.add(recordingState.sectionId, { lastUpdated, requests: recordingState.fulfilledRequests })
+
     removeRecording(clientId)
 }
 
@@ -202,7 +220,7 @@ function stopRecording(error, clientId) {
 
     console.log('[SW] Stopping recording', { clientId, recordingState })
     clearTimeout(recordingState?.recordingTimeout)
-    recordingState.recordingAllRequests = false
+    recordingState.recording = false
 
     if (error) {
         // QUESTION: Anything else we should do to handle errors better?
@@ -230,10 +248,8 @@ function startRecordingTimeout(clientId) {
 
 function handleRecordedResponse(request, response, clientId) {
     const recordingState = clientRecordingStates[clientId]
-    // add response to cache.
-    // TODO: Actually.. should this only happen upon successful recording?
-    // Maybe make a temp cache that can be thrown out if recording fails?
-    addToCache(recordingState.recordedSectionId, request, response)
+    // add response to temp cache - when recording is successful, move to permanent cache
+    addToCache(`temp-${clientId}`, request, response)
 
     // add request to fulfilled
     recordingState.fulfilledRequests.set(request.url, request)

@@ -9,7 +9,7 @@ function App() {
         navigator.serviceWorker.controller?.postMessage({
             type: 'START_RECORDING',
             recordingTimeoutDelay,
-            recordedSectionId: '1234',
+            sectionId: 'testId1234',
         })
         return networkAction()
     }
@@ -60,7 +60,7 @@ function App() {
         )
         console.log('[App] result of recordResults callback:', { res })
     }
-    
+
     return (
         <div className="App">
             <header className="App-header">
