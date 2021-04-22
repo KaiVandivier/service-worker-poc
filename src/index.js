@@ -19,18 +19,35 @@ ReactDOM.render(
 // Learn more about service workers: https://cra.link/PWA
 serviceWorkerRegistration.register({
     // These callbacks can be used to prompt user to activate new service worker
-    onUpdate: (registration) =>
-        // if (confirm('use new SW?')) registration.postMessage({ type: 'SKIP_WAITING' })
+    // Called when a previous SW exists and a new one is installed
+    onUpdate: (registration) => {
+        if (
+            window.confirm(
+                'New service worker installed and ready to activate. Reload and activate now?'
+            )
+        ) {
+            registration.waiting.postMessage({ type: 'SKIP_WAITING' })
+        }
         console.log(
             'New service worker installed and ready to activate',
             registration
-        ),
+        )
+    },
+    // Called when installed for the first time
     onSuccess: (registration) =>
         console.log('New service worker active', registration),
 })
 
-// Service worker message interface
+let reloaded
 if ('serviceWorker' in navigator) {
+    // Reload when new ServiceWorker becomes active
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (reloaded) return
+        reloaded = true
+        window.location.reload()
+    })
+
+    // Service worker message listeners
     navigator.serviceWorker.onmessage = (event) => {
         if (event.data && event.data.type === 'RECORDING_ERROR') {
             console.error(
