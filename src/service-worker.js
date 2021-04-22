@@ -17,6 +17,7 @@ import { NetworkFirst } from 'workbox-strategies'
 
 let dbPromise
 const clientRecordingStates = {}
+const DB_VERSION = 1
 
 clientsClaim()
 
@@ -112,6 +113,10 @@ self.addEventListener('message', (event) => {
     if (event.data && event.data.type === 'COMPLETE_RECORDING') {
         completeRecording(event.source.id) // same as FetchEvent.clientId
     }
+
+    if (event.data && event.data.type === 'DELETE_RECORDED_SECTION') {
+        deleteRecordedSection(event.data.payload?.recordedSection)
+    }
 })
 
 // Any other custom service worker logic can go here.
@@ -122,16 +127,40 @@ self.addEventListener('activate', (event) => {
 })
 
 function createDB() {
-    // TODO
-    // dbPromise = openDB(...)
+    dbPromise = openDB('recorded-section-store', DB_VERSION, {
+        upgrade(db, oldVersion, newVersion, transaction) {
+            // DB versioning trick that can iteratively apply upgrades
+            // https://developers.google.com/web/ilt/pwa/working-with-indexeddb#using_database_versioning
+            // eslint-disable-next-line default-case
+            switch (oldVersion) {
+                case 0:
+                    // Any indexes needed here?
+                    db.createObjectStore('recorded-sections', {
+                        keyPath: 'sectionId',
+                    })
+            }
+        },
+    })
 }
 
 /**
  * Recording mode helpers
  */
 
+function getCacheKey() {
+    // TODO
+}
+
 function isClientRecording(clientId) {
     return clientRecordingStates[clientId]?.recording
+}
+
+function addToCache(cacheKey, request, response) {
+    if (response.ok) {
+        console.log(`[SW] Response ok - adding ${request.url} to cache`)
+        const responseClone = response.clone()
+        caches.open(cacheKey).then((cache) => cache.put(request, responseClone))
+    }
 }
 
 // Triggered on 'START_RECORDING' message
@@ -165,7 +194,7 @@ function removeRecording(clientId) {
     // Remove recording state
     delete clientRecordingStates[clientId]
     // Delete temp cache
-    caches.delete(`temp-${clientId}`)
+    caches.delete(`temp-${clientId}`) // TODO: Use getCacheKey()
 }
 
 // Triggered by 'COMPLETE_RECORDING' message
@@ -175,16 +204,26 @@ async function completeRecording(clientId) {
     clearTimeout(recordingState.confirmationTimeout)
 
     // Move requests from temp cache to section-<ID> cache
-    const sectionCache = await caches.open(`section-${recordingState.sectionId}`)
-    const tempCache = await caches.open(`temp-${clientId}`)
-    const tempCacheKeys = await tempCache.keys()
-    tempCacheKeys.forEach(async request => {
+    const sectionCache = await caches.open(
+        `section-${recordingState.sectionId}` // TODO: Use getCacheKey()
+    )
+    const tempCache = await caches.open(`temp-${clientId}`) // TODO: Use getCacheKey()
+    const tempCacheKeys = await tempCache.keys() // could also be recordingState.fulfilledRequests
+    tempCacheKeys.forEach(async (request) => {
         const response = await tempCache.match(request)
         sectionCache.put(request, response)
     })
 
-    // TODO: Add content to DB
-    // idb.add(recordingState.sectionId, { lastUpdated, requests: recordingState.fulfilledRequests })
+    // Add content to DB
+    const db = await dbPromise
+    db.put('recorded-sections', {
+        // Note that request objects can't be stored in the IDB
+        // https://stackoverflow.com/questions/32880073/whats-the-best-option-for-structured-cloning-of-a-fetch-api-request-object
+        sectionId: recordingState.sectionId, // the key path
+        cacheKey: `section-${recordingState.sectionId}`, // TODO: Use getCacheKey()
+        lastUpdated: new Date(),
+        requests: recordingState.fulfilledRequests,
+    }).catch((err) => console.error)
 
     removeRecording(clientId)
 }
@@ -252,7 +291,9 @@ function handleRecordedResponse(request, response, clientId) {
     addToCache(`temp-${clientId}`, request, response)
 
     // add request to fulfilled
-    recordingState.fulfilledRequests.set(request.url, request)
+    // note that request objects can't be stored in IDB (see 'complet recording' function)
+    // QUESTION: Something better to store as value? If not, an array may be appropriate
+    recordingState.fulfilledRequests.set(request.url, 'placeholder-value')
 
     // remove request from pending requests
     recordingState.pendingRequests.delete(request)
@@ -279,10 +320,12 @@ function handleRecordedRequest({ url, request, event, params }) {
         })
 }
 
-function addToCache(cacheKey, request, response) {
-    if (response.ok) {
-        console.log(`[SW] Response ok - adding ${request.url} to cache`)
-        const responseClone = response.clone()
-        caches.open(cacheKey).then((cache) => cache.put(request, responseClone))
-    }
+async function deleteRecordedSection(sectionId) {
+    if (!sectionId) throw new Error('[SW] No section ID specified to delete')
+    const db = await dbPromise
+    const cacheKey = `section-${sectionId}` // TODO: Use 'getCacheKey'
+    return Promise.all([
+        caches.delete(cacheKey),
+        db.delete('recorded-section', sectionId),
+    ])
 }
