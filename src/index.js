@@ -20,6 +20,7 @@ ReactDOM.render(
 serviceWorkerRegistration.register({
     // These callbacks can be used to prompt user to activate new service worker
     onUpdate: (registration) =>
+        // if (confirm('use new SW?')) registration.postMessage({ type: 'SKIP_WAITING' })
         console.log(
             'New service worker installed and ready to activate',
             registration
