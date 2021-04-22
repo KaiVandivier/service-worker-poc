@@ -148,8 +148,8 @@ function createDB() {
  * Recording mode helpers
  */
 
-function getCacheKey() {
-    // TODO
+function getCacheKey(...args) {
+    return args.join('-')
 }
 
 function isClientRecording(clientId) {
@@ -195,7 +195,8 @@ function removeRecording(clientId) {
     // Remove recording state
     delete clientRecordingStates[clientId]
     // Delete temp cache
-    caches.delete(`temp-${clientId}`) // TODO: Use getCacheKey()
+    const cacheKey = getCacheKey('temp', clientId)
+    return caches.delete(cacheKey)
 }
 
 // Triggered by 'COMPLETE_RECORDING' message
@@ -205,12 +206,11 @@ async function completeRecording(clientId) {
     clearTimeout(recordingState.confirmationTimeout)
 
     // Move requests from temp cache to section-<ID> cache
-    const sectionCache = await caches.open(
-        `section-${recordingState.sectionId}` // TODO: Use getCacheKey()
-    )
-    const tempCache = await caches.open(`temp-${clientId}`) // TODO: Use getCacheKey()
-    const tempCacheKeys = await tempCache.keys() // could also be recordingState.fulfilledRequests
-    tempCacheKeys.forEach(async (request) => {
+    const sectionCacheKey = getCacheKey('section', recordingState.sectionId)
+    const sectionCache = await caches.open(sectionCacheKey)
+    const tempCache = await caches.open(getCacheKey('temp', clientId))
+    const tempCacheItemKeys = await tempCache.keys()
+    tempCacheItemKeys.forEach(async (request) => {
         const response = await tempCache.match(request)
         sectionCache.put(request, response)
     })
@@ -221,7 +221,7 @@ async function completeRecording(clientId) {
         // Note that request objects can't be stored in the IDB
         // https://stackoverflow.com/questions/32880073/whats-the-best-option-for-structured-cloning-of-a-fetch-api-request-object
         sectionId: recordingState.sectionId, // the key path
-        cacheKey: `section-${recordingState.sectionId}`, // TODO: Use getCacheKey()
+        cacheKey: sectionCacheKey,
         lastUpdated: new Date(),
         requests: recordingState.fulfilledRequests,
     }).catch((err) => console.error)
@@ -289,7 +289,8 @@ function startRecordingTimeout(clientId) {
 function handleRecordedResponse(request, response, clientId) {
     const recordingState = clientRecordingStates[clientId]
     // add response to temp cache - when recording is successful, move to permanent cache
-    addToCache(`temp-${clientId}`, request, response)
+    const tempCacheKey = getCacheKey('temp', clientId)
+    addToCache(tempCacheKey, request, response)
 
     // add request to fulfilled
     // note that request objects can't be stored in IDB (see 'complet recording' function)
@@ -324,7 +325,7 @@ function handleRecordedRequest({ url, request, event, params }) {
 async function deleteRecordedSection(sectionId) {
     if (!sectionId) throw new Error('[SW] No section ID specified to delete')
     const db = await dbPromise
-    const cacheKey = `section-${sectionId}` // TODO: Use 'getCacheKey'
+    const cacheKey = getCacheKey('section', sectionId)
     return Promise.all([
         caches.delete(cacheKey),
         db.delete('recorded-sections', sectionId),
