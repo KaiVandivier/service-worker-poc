@@ -67,10 +67,9 @@ registerRoute(
     createHandlerBoundToURL(process.env.PUBLIC_URL + '/index.html')
 )
 
-/**
- * Possible cache-first route for 'vendor' files, if precaching is too complicated.
- * Do we want to add i18n files here too?
- */
+
+// Possible cache-first route for 'vendor' files, if precaching is too complicated.
+// Do we want to add i18n files here too?  All of /public?
 registerRoute(
     /(.*)\/vendor\/(.*)/,
     new CacheFirst({
@@ -79,29 +78,27 @@ registerRoute(
     })
 )
 
-/**
- * Todo: network-first, but in recording mode
- */
+// Request handler during recording mode
 registerRoute(
     ({ url, request, event }) => isClientRecording(event.clientId),
     handleRecordedRequest
 )
 
-/**
- * Network-first caching by default unless filtered out
- */
+// Network-first caching by default unless filtered out
 registerRoute(({ url, request, event }) => {
     // Don't cache external requests by default
     // QUESTION: Can this safely be generalized to all apps?
     if (url.origin !== self.location.origin) return false
+
     // TODO: if (url matches filter) return false
+
     return true
 }, new NetworkFirst({ cacheName: 'app-shell', plugins: [new ExpirationPlugin({ maxAgeSeconds: 30 * 24 * 60 * 60 })] }))
 
-// This allows the web app to trigger skipWaiting via
-// registration.waiting.postMessage({type: 'SKIP_WAITING'})
-// Paired with `clientsClaim()` at top of file.
 self.addEventListener('message', (event) => {
+    // This allows the web app to trigger skipWaiting via
+    // registration.waiting.postMessage({type: 'SKIP_WAITING'})
+    // Paired with `clientsClaim()` at top of file.
     if (event.data && event.data.type === 'SKIP_WAITING') {
         self.skipWaiting()
     }
@@ -322,6 +319,7 @@ function handleRecordedRequest({ url, request, event, params }) {
         })
 }
 
+// Triggered by 'DELETE_RECORDED_SECTION' message
 async function deleteRecordedSection(sectionId) {
     if (!sectionId) throw new Error('[SW] No section ID specified to delete')
     const db = await dbPromise
