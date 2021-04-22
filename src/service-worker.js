@@ -67,7 +67,6 @@ registerRoute(
     createHandlerBoundToURL(process.env.PUBLIC_URL + '/index.html')
 )
 
-
 // Possible cache-first route for 'vendor' files, if precaching is too complicated.
 // Do we want to add i18n files here too?  All of /public?
 registerRoute(
@@ -265,8 +264,10 @@ function stopRecording(error, clientId) {
             console.log('[SW] posting error message to client', client)
             client.postMessage({
                 type: 'RECORDING_ERROR',
-                clientId,
-                error,
+                payload: {
+                    error,
+                    clientId,
+                },
             })
         })
         return

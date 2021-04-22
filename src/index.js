@@ -12,7 +12,7 @@ ReactDOM.render(
     document.getElementById('root')
 )
 
-// TODO: Conditionally register based on d2.config
+// TODO: Conditionally register/unregister based on d2.config
 
 // If you want your app to work offline and load faster, you can change
 // unregister() to register() below. Note this comes with some pitfalls.
@@ -31,8 +31,11 @@ serviceWorkerRegistration.register({
 // Service worker message interface
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.onmessage = (event) => {
-        if (event.data && event.data.type === 'DONE_RECORDING') {
-            console.log('[App] Received "Done recording" message', event.data)
+        if (event.data && event.data.type === 'RECORDING_ERROR') {
+            console.error(
+                '[App] Received recording error',
+                event.data.payload.error
+            )
         }
 
         if (event.data && event.data.type === 'CONFIRM_RECORDING_COMPLETION') {
