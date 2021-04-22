@@ -115,7 +115,7 @@ self.addEventListener('message', (event) => {
     }
 
     if (event.data && event.data.type === 'DELETE_RECORDED_SECTION') {
-        deleteRecordedSection(event.data.payload?.recordedSection)
+        deleteRecordedSection(event.data.payload?.sectionId)
     }
 })
 
@@ -167,7 +167,7 @@ function addToCache(cacheKey, request, response) {
 function startRecording(event) {
     console.log('[SW] Starting recording')
     if (!event.data.sectionId)
-        throw new Error('[SW] No ID specified for recorded section')
+        throw new Error('[SW] No section ID specified to record')
 
     const clientId = event.source.id // clientId from MessageEvent
     // Throw error if another recording is in process
@@ -326,6 +326,6 @@ async function deleteRecordedSection(sectionId) {
     const cacheKey = `section-${sectionId}` // TODO: Use 'getCacheKey'
     return Promise.all([
         caches.delete(cacheKey),
-        db.delete('recorded-section', sectionId),
+        db.delete('recorded-sections', sectionId),
     ])
 }

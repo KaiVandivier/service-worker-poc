@@ -61,6 +61,20 @@ function App() {
         console.log('[App] result of recordResults callback:', { res })
     }
 
+    function deleteSection() {
+      console.log('[SW] Attempting to delete section...')
+        navigator.serviceWorker.controller?.postMessage({
+            type: 'DELETE_RECORDED_SECTION',
+            payload: { sectionId: 'testId1234' },
+        })
+    }
+
+    function skipWaiting() {
+        navigator.serviceWorker.controller?.postMessage({
+            type: 'SKIP_WAITING',
+        })
+    }
+
     return (
         <div className="App">
             <header className="App-header">
@@ -69,8 +83,14 @@ function App() {
                     Edit <code>src/App.js</code> and save to reload.
                 </p>
                 <div className="button-container">
+                    <button onClick={skipWaiting}>
+                        {"Skip waiting (doesn't seem to work)"}
+                    </button>
                     <button onClick={onClick}>
                         {'Trigger cascading requests & record'}
+                    </button>
+                    <button onClick={deleteSection}>
+                        {'Delete recorded section'}
                     </button>
                     <p>Links to static resources:</p>
                     <a href="./cats/green-cat-png.png" className="App-link">
