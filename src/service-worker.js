@@ -123,6 +123,7 @@ self.addEventListener('message', (event) => {
 
 // Open DB on activation
 self.addEventListener('activate', (event) => {
+    console.log('[SW] New service worker activated')
     event.waitUntil(createDB())
 })
 
@@ -166,7 +167,7 @@ function addToCache(cacheKey, request, response) {
 // Triggered on 'START_RECORDING' message
 function startRecording(event) {
     console.log('[SW] Starting recording')
-    if (!event.data.sectionId)
+    if (!event.data.payload?.sectionId)
         throw new Error('[SW] No section ID specified to record')
 
     const clientId = event.source.id // clientId from MessageEvent
@@ -179,11 +180,11 @@ function startRecording(event) {
     const newClientRecordingState = {
         // 'recordingAll' might be necessary between 'done recording' and 'confirm save recording'
         recording: true,
-        sectionId: event.data.sectionId,
+        sectionId: event.data.payload?.sectionId,
         pendingRequests: new Map(),
         fulfilledRequests: new Map(),
         recordingTimeout: undefined,
-        recordingTimeoutDelay: event.data.recordingTimeoutDelay || 200,
+        recordingTimeoutDelay: event.data.payload?.recordingTimeoutDelay || 200,
         confirmationTimeout: undefined,
     }
     clientRecordingStates[clientId] = newClientRecordingState

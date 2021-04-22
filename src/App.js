@@ -8,8 +8,10 @@ function App() {
         console.log('[App] Sending "Start recording" message')
         navigator.serviceWorker.controller?.postMessage({
             type: 'START_RECORDING',
-            recordingTimeoutDelay,
-            sectionId: 'testId1234',
+            payload: {
+                recordingTimeoutDelay,
+                sectionId: 'testId1234',
+            },
         })
         return networkAction()
     }
@@ -62,7 +64,7 @@ function App() {
     }
 
     function deleteSection() {
-      console.log('[SW] Attempting to delete section...')
+        console.log('[SW] Attempting to delete section...')
         navigator.serviceWorker.controller?.postMessage({
             type: 'DELETE_RECORDED_SECTION',
             payload: { sectionId: 'testId1234' },
@@ -70,8 +72,14 @@ function App() {
     }
 
     function skipWaiting() {
-        navigator.serviceWorker.controller?.postMessage({
-            type: 'SKIP_WAITING',
+        navigator.serviceWorker.ready.then((registration) => {
+            if (!registration.waiting)
+                return console.warn(
+                    '[App] No service worker is waiting to be activated.'
+                )
+            registration.waiting.postMessage({
+                type: 'SKIP_WAITING',
+            })
         })
     }
 
@@ -83,9 +91,7 @@ function App() {
                     Edit <code>src/App.js</code> and save to reload.
                 </p>
                 <div className="button-container">
-                    <button onClick={skipWaiting}>
-                        {"Skip waiting (doesn't seem to work)"}
-                    </button>
+                    <button onClick={skipWaiting}>{'Skip waiting'}</button>
                     <button onClick={onClick}>
                         {'Trigger cascading requests & record'}
                     </button>
