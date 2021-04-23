@@ -28,19 +28,20 @@ clientsClaim()
 precacheAndRoute(self.__WB_MANIFEST)
 
 /**
- * A test to see if another precacheAndRouteCall works (it does).
+ * Kai: A test to see if another precacheAndRouteCall works (it does).
  * Limitation: files need to be explicitly specified; I haven't found
  * a way to use a glob yet.
- * Maybe this could be handled by a cache-first route? It wouldn't be precached.
+ * Maybe this could be handled by a cache-first route? It wouldn't be precached,
+ * but would be handled smartly and separately from recording-mode.
  * (Cache-first route is down below)
  */
 precacheAndRoute([
     { url: './vendor/jquery-3.3.1.min.js', revision: null },
-    { url: 'nonexistent/url-v1.png', revision: null },
+    { url: 'nonexistent/url-v1.png', revision: null }, // doesn't throw error
 ])
 
 /**
- * (Kai: Do we need this? It might let us move away from a hash router?)
+ * (QUESTION: Do we need this?)
  */
 // Set up App Shell-style routing, so that all navigation requests
 // are fulfilled with your index.html shell. Learn more at
@@ -174,7 +175,7 @@ function startRecording(event) {
         )
 
     const newClientRecordingState = {
-        // 'recordingAll' might be necessary between 'done recording' and 'confirm save recording'
+        // 'recording' might be necessary between 'done recording' and 'confirm save recording'
         recording: true,
         sectionId: event.data.payload?.sectionId,
         pendingRequests: new Map(),
