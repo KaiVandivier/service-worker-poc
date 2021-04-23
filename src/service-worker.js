@@ -1,12 +1,5 @@
 /* eslint-disable no-restricted-globals */
 
-// This service worker can be customized!
-// See https://developers.google.com/web/tools/workbox/modules
-// for the list of available Workbox modules, or add any other
-// code you'd like.
-// You can also remove this file if you'd prefer not to use a
-// service worker, and the Workbox build step will be skipped.
-
 import { clientsClaim } from 'workbox-core'
 import { ExpirationPlugin } from 'workbox-expiration'
 import { precacheAndRoute, createHandlerBoundToURL } from 'workbox-precaching'
@@ -41,7 +34,7 @@ precacheAndRoute([
 ])
 
 /**
- * (QUESTION: Do we need this?)
+ * (QUESTION: Do we need this route?)
  */
 // Set up App Shell-style routing, so that all navigation requests
 // are fulfilled with your index.html shell. Learn more at
@@ -79,6 +72,7 @@ registerRoute(
 )
 
 // Request handler during recording mode
+// Handling routing: https://developers.google.com/web/tools/workbox/modules/workbox-routing#matching_and_handling_in_routes
 registerRoute(
     ({ url, request, event }) => isClientRecording(event.clientId),
     handleRecordedRequest
@@ -87,7 +81,7 @@ registerRoute(
 // Network-first caching by default unless filtered out
 registerRoute(({ url, request, event }) => {
     // Don't cache external requests by default
-    // QUESTION: Can this safely be generalized to all apps?
+    // QUESTION: Can this rule safely be generalized to all apps?
     if (url.origin !== self.location.origin) return false
 
     // TODO: if (url matches filter) return false
@@ -116,13 +110,13 @@ self.addEventListener('message', (event) => {
     }
 })
 
-// Any other custom service worker logic can go here.
-
 // Open DB on activation
 self.addEventListener('activate', (event) => {
     console.log('[SW] New service worker activated')
     event.waitUntil(createDB())
 })
+
+// Helper functions:
 
 function createDB() {
     dbPromise = openDB('recorded-section-store', DB_VERSION, {
@@ -140,10 +134,6 @@ function createDB() {
         },
     })
 }
-
-/**
- * Recording mode helpers
- */
 
 function getCacheKey(...args) {
     return args.join('-')
