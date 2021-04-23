@@ -36,7 +36,7 @@ precacheAndRoute(self.__WB_MANIFEST)
  * (Cache-first route is down below)
  */
 precacheAndRoute([
-    { url: './vendor/jquery-3.3.1.min.js', revision: null },
+    { url: './vendor/jquery-migrate-3.0.1.min.js', revision: null },
     { url: 'nonexistent/url-v1.png', revision: null }, // doesn't throw error
 ])
 
@@ -68,12 +68,28 @@ registerRoute(
     createHandlerBoundToURL(process.env.PUBLIC_URL + '/index.html')
 )
 
-// Possible cache-first route for 'vendor' files, if precaching is too complicated.
-// Do we want to add i18n files here too?  All of /public?
+// Possible cache-first route for static assets, if precaching is too complicated.
 registerRoute(
-    /(.*)\/vendor\/(.*)/,
+    ({ url, request, event }) => {
+        console.log('[SW] Checking request for cache-first criteria', {
+            url,
+            location: self.location,
+        })
+        // Don't handle requests to external domains
+        if (url.origin !== self.location.origin) return false
+        // Don't handle service worker
+        if (url.pathname === self.location.pathname) return false
+        // Handle static assets for this app
+        // (Needed in addition to test below in case this app is deployed somewhere other than a DHIS2 instance)
+        const buildPath = new URL('./', self.location.href).pathname
+        if (new RegExp(buildPath).test(url.pathname)) return true
+        // Handle static assets from (other) dhis2 web apps (e.g. ../dhis-web-maps/maps.js)
+        const dhis2AppPartialPath = new URL('../dhis-web-', self.location.href)
+            .pathname
+        if (new RegExp(dhis2AppPartialPath).test(url.pathname)) return true
+    },
     new CacheFirst({
-        cacheName: 'vendor',
+        cacheName: 'other-assets',
         plugins: [new ExpirationPlugin({ maxAgeSeconds: 30 * 24 * 60 * 60 })], // 30 days
     })
 )
@@ -91,7 +107,12 @@ registerRoute(({ url, request, event }) => {
     // QUESTION: Can this rule safely be generalized to all apps?
     if (url.origin !== self.location.origin) return false
 
-    // TODO: if (url matches filter) return false
+    // Don't cache if (url matches filter) return false
+    const filters = [] // TODO: Get from config
+    const urlMatchesFilter = filters.some((filter) =>
+        new RegExp(filter).test(url.pathname)
+    )
+    if (urlMatchesFilter) return false
 
     return true
 }, new NetworkFirst({ cacheName: 'app-shell', plugins: [new ExpirationPlugin({ maxAgeSeconds: 30 * 24 * 60 * 60 })] }))

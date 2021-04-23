@@ -83,6 +83,10 @@ function App() {
         })
     }
 
+    function fetchVendorItem() {
+        fetch('./vendor/jquery-3.3.1.min.js')
+    }
+
     return (
         <div className="App">
             <header className="App-header">
@@ -97,6 +101,9 @@ function App() {
                     </button>
                     <button onClick={deleteSection}>
                         {'Delete recorded section'}
+                    </button>
+                    <button onClick={fetchVendorItem}>
+                        {'Fetch vendor item to test cache-first route'}
                     </button>
                     <p>Links to static resources:</p>
                     <a href="./cats/green-cat-png.png" className="App-link">
