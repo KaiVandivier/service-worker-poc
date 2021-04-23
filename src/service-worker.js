@@ -165,22 +165,6 @@ function createDB() {
     })
 }
 
-function getCacheKey(...args) {
-    return args.join('-')
-}
-
-function isClientRecording(clientId) {
-    return clientRecordingStates[clientId]?.recording
-}
-
-function addToCache(cacheKey, request, response) {
-    if (response.ok) {
-        console.log(`[SW] Response ok - adding ${request.url} to cache`)
-        const responseClone = response.clone()
-        caches.open(cacheKey).then((cache) => cache.put(request, responseClone))
-    }
-}
-
 // Triggered on 'START_RECORDING' message
 function startRecording(event) {
     console.log('[SW] Starting recording')
@@ -207,6 +191,91 @@ function startRecording(event) {
     clientRecordingStates[clientId] = newClientRecordingState
 }
 
+function isClientRecording(clientId) {
+    return clientRecordingStates[clientId]?.recording
+}
+
+function handleRecordedRequest({ url, request, event, params }) {
+    const recordingState = clientRecordingStates[event.clientId]
+
+    clearTimeout(recordingState.recordingTimeout)
+    recordingState.pendingRequests.set(request, 'placeholder') // Something better to put here? timestamp?
+
+    fetch(request)
+        .then((response) => {
+            return handleRecordedResponse(request, response, event.clientId)
+        })
+        .catch((error) => {
+            console.errror(error)
+            stopRecording(error, event.clientId)
+        })
+}
+
+function handleRecordedResponse(request, response, clientId) {
+    const recordingState = clientRecordingStates[clientId]
+    // add response to temp cache - when recording is successful, move to permanent cache
+    const tempCacheKey = getCacheKey('temp', clientId)
+    addToCache(tempCacheKey, request, response)
+
+    // add request to fulfilled
+    // note that request objects can't be stored in IDB (see 'complet recording' function)
+    // QUESTION: Something better to store as value? If not, an array may be appropriate
+    recordingState.fulfilledRequests.set(request.url, 'placeholder-value')
+
+    // remove request from pending requests
+    recordingState.pendingRequests.delete(request)
+
+    // start timer if pending requests are all complete
+    if (recordingState.pendingRequests.size === 0)
+        startRecordingTimeout(clientId)
+    return response
+}
+
+function startRecordingTimeout(clientId) {
+    const recordingState = clientRecordingStates[clientId]
+    recordingState.recordingTimeout = setTimeout(
+        () => stopRecording(null, clientId),
+        recordingState.recordingTimeoutDelay
+    )
+}
+
+function stopRecording(error, clientId) {
+    const recordingState = clientRecordingStates[clientId]
+
+    console.log('[SW] Stopping recording', { clientId, recordingState })
+    clearTimeout(recordingState?.recordingTimeout)
+    recordingState.recording = false
+
+    if (error) {
+        // QUESTION: Anything else we should do to handle errors better?
+        self.clients.get(clientId).then((client) => {
+            console.log('[SW] posting error message to client', client)
+            client.postMessage({
+                type: 'RECORDING_ERROR',
+                payload: {
+                    error,
+                    clientId,
+                },
+            })
+        })
+        return
+    }
+
+    requestCompletionConfirmation(clientId)
+}
+
+function getCacheKey(...args) {
+    return args.join('-')
+}
+
+function addToCache(cacheKey, request, response) {
+    if (response.ok) {
+        console.log(`[SW] Response ok - adding ${request.url} to cache`)
+        const responseClone = response.clone()
+        caches.open(cacheKey).then((cache) => cache.put(request, responseClone))
+    }
+}
+
 function removeRecording(clientId) {
     console.log('[SW] Removing recording for client ID', clientId)
     // Remove recording state
@@ -214,6 +283,32 @@ function removeRecording(clientId) {
     // Delete temp cache
     const cacheKey = getCacheKey('temp', clientId)
     return caches.delete(cacheKey)
+}
+
+async function requestCompletionConfirmation(clientId) {
+    console.log(
+        '[SW] Requesting completion confirmation from client ID',
+        clientId
+    )
+    const client = await self.clients.get(clientId)
+    if (!client) {
+        console.log('[SW] Client not found for ID', clientId)
+        removeRecording(clientId)
+        return
+    }
+    client.postMessage({ type: 'CONFIRM_RECORDING_COMPLETION', clientId })
+    startConfirmationTimeout(clientId)
+}
+
+function startConfirmationTimeout(clientId) {
+    const recordingState = clientRecordingStates[clientId]
+    recordingState.confirmationTimeout = setTimeout(() => {
+        console.warn(
+            '[SW] Completion confirmation timed out. Clearing recording for client',
+            clientId
+        )
+        removeRecording(clientId)
+    }, 10000)
 }
 
 // Triggered by 'COMPLETE_RECORDING' message
@@ -244,101 +339,6 @@ async function completeRecording(clientId) {
     }).catch((err) => console.error)
 
     removeRecording(clientId)
-}
-
-function startConfirmationTimeout(clientId) {
-    const recordingState = clientRecordingStates[clientId]
-    recordingState.confirmationTimeout = setTimeout(() => {
-        console.warn(
-            '[SW] Completion confirmation timed out. Clearing recording for client',
-            clientId
-        )
-        removeRecording(clientId)
-    }, 10000)
-}
-
-async function requestCompletionConfirmation(clientId) {
-    console.log(
-        '[SW] Requesting completion confirmation from client ID',
-        clientId
-    )
-    const client = await self.clients.get(clientId)
-    if (!client) {
-        console.log('[SW] Client not found for ID', clientId)
-        removeRecording(clientId)
-        return
-    }
-    client.postMessage({ type: 'CONFIRM_RECORDING_COMPLETION', clientId })
-    startConfirmationTimeout(clientId)
-}
-
-function stopRecording(error, clientId) {
-    const recordingState = clientRecordingStates[clientId]
-
-    console.log('[SW] Stopping recording', { clientId, recordingState })
-    clearTimeout(recordingState?.recordingTimeout)
-    recordingState.recording = false
-
-    if (error) {
-        // QUESTION: Anything else we should do to handle errors better?
-        self.clients.get(clientId).then((client) => {
-            console.log('[SW] posting error message to client', client)
-            client.postMessage({
-                type: 'RECORDING_ERROR',
-                payload: {
-                    error,
-                    clientId,
-                },
-            })
-        })
-        return
-    }
-
-    requestCompletionConfirmation(clientId)
-}
-
-function startRecordingTimeout(clientId) {
-    const recordingState = clientRecordingStates[clientId]
-    recordingState.recordingTimeout = setTimeout(
-        () => stopRecording(null, clientId),
-        recordingState.recordingTimeoutDelay
-    )
-}
-
-function handleRecordedResponse(request, response, clientId) {
-    const recordingState = clientRecordingStates[clientId]
-    // add response to temp cache - when recording is successful, move to permanent cache
-    const tempCacheKey = getCacheKey('temp', clientId)
-    addToCache(tempCacheKey, request, response)
-
-    // add request to fulfilled
-    // note that request objects can't be stored in IDB (see 'complet recording' function)
-    // QUESTION: Something better to store as value? If not, an array may be appropriate
-    recordingState.fulfilledRequests.set(request.url, 'placeholder-value')
-
-    // remove request from pending requests
-    recordingState.pendingRequests.delete(request)
-
-    // start timer if pending requests are all complete
-    if (recordingState.pendingRequests.size === 0)
-        startRecordingTimeout(clientId)
-    return response
-}
-
-function handleRecordedRequest({ url, request, event, params }) {
-    const recordingState = clientRecordingStates[event.clientId]
-
-    clearTimeout(recordingState.recordingTimeout)
-    recordingState.pendingRequests.set(request, 'placeholder') // Something better to put here? timestamp?
-
-    fetch(request)
-        .then((response) => {
-            return handleRecordedResponse(request, response, event.clientId)
-        })
-        .catch((error) => {
-            console.errror(error)
-            stopRecording(error, event.clientId)
-        })
 }
 
 // Triggered by 'DELETE_RECORDED_SECTION' message
