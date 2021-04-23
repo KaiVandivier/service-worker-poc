@@ -179,8 +179,6 @@ function startRecording(event) {
         )
 
     const newClientRecordingState = {
-        // 'recording' might be necessary between 'done recording' and 'confirm save recording'
-        recording: true,
         sectionId: event.data.payload?.sectionId,
         pendingRequests: new Map(),
         fulfilledRequests: new Map(),
@@ -192,7 +190,7 @@ function startRecording(event) {
 }
 
 function isClientRecording(clientId) {
-    return clientRecordingStates[clientId]?.recording
+    return clientId in clientRecordingStates
 }
 
 function handleRecordedRequest({ url, request, event, params }) {
@@ -244,7 +242,6 @@ function stopRecording(error, clientId) {
 
     console.log('[SW] Stopping recording', { clientId, recordingState })
     clearTimeout(recordingState?.recordingTimeout)
-    recordingState.recording = false
 
     if (error) {
         // QUESTION: Anything else we should do to handle errors better?
@@ -261,6 +258,7 @@ function stopRecording(error, clientId) {
         return
     }
 
+    // Prompt client to confirm saving recording
     requestCompletionConfirmation(clientId)
 }
 
