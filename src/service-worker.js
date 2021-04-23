@@ -5,8 +5,7 @@ import { ExpirationPlugin } from 'workbox-expiration'
 import { precacheAndRoute, createHandlerBoundToURL } from 'workbox-precaching'
 import { registerRoute } from 'workbox-routing'
 import { openDB } from 'idb'
-import { CacheFirst } from 'workbox-strategies'
-import { NetworkFirst } from 'workbox-strategies'
+import { CacheFirst, NetworkFirst } from 'workbox-strategies'
 
 let dbPromise
 const clientRecordingStates = {}
@@ -150,21 +149,26 @@ function createDB() {
         upgrade(db, oldVersion, newVersion, transaction) {
             // DB versioning trick that can iteratively apply upgrades
             // https://developers.google.com/web/ilt/pwa/working-with-indexeddb#using_database_versioning
-            /* eslint-disable default-case, no-fallthrough */
             switch (oldVersion) {
-                case 0:
+                case 0: {
                     db.createObjectStore('recorded-sections', {
                         keyPath: 'sectionId',
                     })
-                case 1:
+                }
+                // falls through (this comment satisfies eslint)
+                case 1: {
                     const sectionOS = transaction.objectStore(
                         'recorded-sections'
                     )
                     sectionOS.createIndex('cacheKey', 'cacheKey', {
                         unique: true,
                     })
+                }
+                // falls through
+                default: {
+                    console.log('[SW] Done upgrading DB')
+                }
             }
-            /* eslint-enable default-case, no-fallthrough */
         },
     })
     return dbPromise
