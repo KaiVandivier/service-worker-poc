@@ -10,7 +10,8 @@ import { NetworkFirst } from 'workbox-strategies'
 
 let dbPromise
 const clientRecordingStates = {}
-const DB_VERSION = 1
+const DB_VERSION = 2
+const CACHE_KEEP_LIST = ['other-assets', 'app-shell']
 
 clientsClaim()
 
@@ -71,13 +72,9 @@ registerRoute(
 // Possible cache-first route for static assets, if precaching is too complicated.
 registerRoute(
     ({ url, request, event }) => {
-        console.log('[SW] Checking request for cache-first criteria', {
-            url,
-            location: self.location,
-        })
         // Don't handle requests to external domains
         if (url.origin !== self.location.origin) return false
-        // Don't handle service worker
+        // Don't handle service worker file
         if (url.pathname === self.location.pathname) return false
         // Handle static assets for this app
         // (Needed in addition to test below in case this app is deployed somewhere other than a DHIS2 instance)
@@ -143,7 +140,7 @@ self.addEventListener('message', (event) => {
 // Open DB on activation
 self.addEventListener('activate', (event) => {
     console.log('[SW] New service worker activated')
-    event.waitUntil(createDB())
+    event.waitUntil(createDB().then(removeUnusedCaches))
 })
 
 // 3. Helper functions:
@@ -153,16 +150,49 @@ function createDB() {
         upgrade(db, oldVersion, newVersion, transaction) {
             // DB versioning trick that can iteratively apply upgrades
             // https://developers.google.com/web/ilt/pwa/working-with-indexeddb#using_database_versioning
-            // eslint-disable-next-line default-case
+            /* eslint-disable default-case, no-fallthrough */
             switch (oldVersion) {
                 case 0:
-                    // Any indexes needed here?
                     db.createObjectStore('recorded-sections', {
                         keyPath: 'sectionId',
                     })
+                case 1:
+                    const sectionOS = transaction.objectStore(
+                        'recorded-sections'
+                    )
+                    sectionOS.createIndex('cacheKey', 'cacheKey', {
+                        unique: true,
+                    })
             }
+            /* eslint-enable default-case, no-fallthrough */
         },
     })
+    return dbPromise
+}
+
+async function removeUnusedCaches() {
+    console.log('[SW] Checking for unused caches to prune...')
+    const cacheKeys = await caches.keys()
+    return Promise.all(
+        cacheKeys.map(async (key) => {
+            const isWorkboxKey = /workbox/.test(key)
+            const isInKeepList = !!CACHE_KEEP_LIST.find(
+                (keepKey) => keepKey === key
+            )
+            const db = await dbPromise
+            const isASavedSection = !!(await db.getFromIndex(
+                'recorded-sections',
+                'cacheKey',
+                key
+            ))
+            if (!isWorkboxKey && !isInKeepList && !isASavedSection) {
+                console.log(
+                    `[SW] Cache with key ${key} is unused and will be deleted`
+                )
+                return caches.delete(key)
+            }
+        })
+    )
 }
 
 // Triggered on 'START_RECORDING' message
